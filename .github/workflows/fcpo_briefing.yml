@@ -1,0 +1,49 @@
+name: FCPO Daily Trading Briefing Cron
+
+on:
+  schedule:
+    # Schedule configured for MYT (UTC+8)
+    - cron: "0 23 * * *" # 07:00 AM MYT (23:00 UTC previous day)
+    - cron: "30 5 * * *" # 01:30 PM MYT (05:30 UTC)
+    - cron: "0 12 * * *" # 08:00 PM MYT (12:00 UTC)
+  workflow_dispatch: # Enables manual trigger button in GitHub Actions UI
+
+jobs:
+  execute-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore SQLite Database Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./fcpo_trading.db
+          key: fcpo-db-${{ github.run_id }}
+          restore-keys: |
+            fcpo-db-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run FCPO Briefing Script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DATABASE_URL: "sqlite+aiosqlite:///./fcpo_trading.db"
+        run: python run_briefing.py
+
+      - name: Save SQLite Database Cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ./fcpo_trading.db
+          key: fcpo-db-${{ github.run_id }}
