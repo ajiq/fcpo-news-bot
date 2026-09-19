@@ -57,12 +57,18 @@ class GeminiFCPOAnalyzer:
         {news_items}
         """
 
-        # Model candidates to cycle through if a 404 NOT_FOUND is returned
-        preferred_model = os.getenv("GEMINI_MODEL") or getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
-        candidate_models = [preferred_model, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
-        
-        # Deduplicate candidates while preserving priority order
-        candidate_models = list(dict.fromkeys([m for m in candidate_models if m]))
+        # Updated active Gemini model candidate chain
+        candidate_models = [
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
+            "gemini-2.5-flash"
+        ]
+
+        # Allow environment override if set in settings
+        preferred = os.getenv("GEMINI_MODEL") or getattr(settings, "GEMINI_MODEL", None)
+        if preferred and preferred not in candidate_models:
+            candidate_models.insert(0, preferred)
 
         last_exception = None
         for model in candidate_models:
