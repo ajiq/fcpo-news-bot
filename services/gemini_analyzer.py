@@ -1,8 +1,12 @@
+import os
+import logging
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 from config.settings import settings
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 class ArticleEvaluation(BaseModel):
     hash_id: str
@@ -18,7 +22,16 @@ class AnalysisBatchResult(BaseModel):
 
 class GeminiFCPOAnalyzer:
     def __init__(self):
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        # Fallback check to ensure API key is captured from OS environment or Pydantic settings
+        api_key = os.getenv("GEMINI_API_KEY") or settings.GEMINI_API_KEY
+        
+        if not api_key or api_key.strip() == "":
+            raise ValueError(
+                "CRITICAL ERROR: GEMINI_API_KEY is empty or missing! "
+                "Please verify that 'GEMINI_API_KEY' is added under GitHub Repository Secrets -> Actions."
+            )
+            
+        self.client = genai.Client(api_key=api_key.strip())
 
     async def analyze_and_filter_news(
         self, 

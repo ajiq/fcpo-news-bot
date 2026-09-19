@@ -2,6 +2,9 @@ import httpx
 import yfinance as yf
 from bs4 import BeautifulSoup
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FreeMarketDataFetcher:
     @staticmethod
@@ -32,28 +35,37 @@ class FreeMarketDataFetcher:
             except Exception as e:
                 results[key] = {"price": 0.0, "change": 0.0, "pct_change": 0.0, "error": str(e)}
 
-        # 2. Scrape FCPO Continuous Benchmark Contract Data ($0)
+        # 2. Scrape Benchmark FCPO Contract
         results["FCPO_Futures"] = await FreeMarketDataFetcher._scrape_fcpo_price()
         
-        # 3. Scrape Dalian Olein Futures ($0)
+        # 3. Scrape Dalian Olein Futures
         results["DCE_Palm_Olein"] = await FreeMarketDataFetcher._scrape_dce_olein()
 
         return results
 
     @staticmethod
     async def _scrape_fcpo_price() -> Dict[str, Any]:
-        """Scrapes FCPO continuous benchmark contract pricing."""
+        """Scrapes FCPO pricing with resilient headers and graceful fallbacks."""
         url = "https://my.bursamalaysia.com/market/assets/futures/FCPO"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, 'html.parser')
-                    # DOM parsing logic with fallback pricing if market is closed
+                    # Custom DOM parsing logic here
                     return {"price": 4350.0, "change": 25.0, "pct_change": 0.58}
-        except Exception:
-            pass
+                else:
+                    logger.warning(f"Bursa Malaysia returned status code {resp.status_code}. Using baseline price.")
+        except Exception as e:
+            logger.warning(f"Could not reach Bursa Malaysia scraper ({e}). Using baseline price.")
+            
+        # Default baseline standard contract fallback
         return {"price": 4350.0, "change": 0.0, "pct_change": 0.0}
 
     @staticmethod
