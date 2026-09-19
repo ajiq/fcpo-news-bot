@@ -3,6 +3,7 @@ import logging
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from config.settings import settings
 from typing import List, Dict, Any
 
@@ -22,15 +23,12 @@ class AnalysisBatchResult(BaseModel):
 
 class GeminiFCPOAnalyzer:
     def __init__(self):
-        # Fallback check to ensure API key is captured from OS environment or Pydantic settings
         api_key = os.getenv("GEMINI_API_KEY") or settings.GEMINI_API_KEY
-        
         if not api_key or api_key.strip() == "":
             raise ValueError(
                 "CRITICAL ERROR: GEMINI_API_KEY is empty or missing! "
                 "Please verify that 'GEMINI_API_KEY' is added under GitHub Repository Secrets -> Actions."
             )
-            
         self.client = genai.Client(api_key=api_key.strip())
 
     async def analyze_and_filter_news(
@@ -59,14 +57,38 @@ class GeminiFCPOAnalyzer:
         {news_items}
         """
 
-        response = self.client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=AnalysisBatchResult,
-                temperature=0.2,
-            ),
-        )
+        # Model candidates to cycle through if a 404 NOT_FOUND is returned
+        preferred_model = os.getenv("GEMINI_MODEL") or getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
+        candidate_models = [preferred_model, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
         
-        return response.parsed
+        # Deduplicate candidates while preserving priority order
+        candidate_models = list(dict.fromkeys([m for m in candidate_models if m]))
+
+        last_exception = None
+        for model in candidate_models:
+            try:
+                logger.info(f"Attempting news analysis with model endpoint: {model}")
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=AnalysisBatchResult,
+                        temperature=0.2,
+                    ),
+                )
+                logger.info(f"Successfully generated analysis with model: {model}")
+                return response.parsed
+            except ClientError as e:
+                if e.code == 404 or "NOT_FOUND" in str(e):
+                    logger.warning(f"Model '{model}' returned 404 NOT_FOUND. Trying next fallback model...")
+                    last_exception = e
+                    continue
+                else:
+                    raise e
+            except Exception as e:
+                logger.warning(f"Model '{model}' failed with error: {e}. Trying next fallback...")
+                last_exception = e
+                continue
+
+        raise RuntimeError(f"All Gemini model candidates failed. Last error: {last_exception}")
