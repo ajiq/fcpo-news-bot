@@ -15,6 +15,7 @@ class NewsIngestionService:
     @staticmethod
     async def fetch_latest_news(db: AsyncSession) -> List[Dict[str, Any]]:
         raw_articles = []
+        seen_in_batch = set()  # In-memory batch deduplication tracker
         
         for feed_url in settings.NEWS_RSS_FEEDS:
             parsed = feedparser.parse(feed_url)
@@ -23,12 +24,17 @@ class NewsIngestionService:
                 url = getattr(entry, 'link', '')
                 hash_id = generate_news_hash(title, url)
                 
-                # Check 48-hour database hash existence (Hard Deduplication)
+                # 1. Skip if already seen in this current run
+                if hash_id in seen_in_batch:
+                    continue
+                
+                # 2. Skip if already exists in database (Hard Deduplication)
                 stmt = select(NewsArticle).where(NewsArticle.hash_id == hash_id)
                 res = await db.execute(stmt)
                 if res.scalar_one_or_none() is not None:
                     continue  
                 
+                seen_in_batch.add(hash_id)
                 raw_articles.append({
                     "hash_id": hash_id,
                     "title": title,
